@@ -1,0 +1,160 @@
+---
+title: "bankCustomerSegmentation"
+author: "Kanishk Kapoor"
+date: '`r Sys.Date()`'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Objective
+
+Your goal for bank customer segmentation should be to group customers based on their financial behavior, demographic characteristics, and credit risk profiles. This can help in:
+	1.	Understanding Customer Profiles – Identifying different types of customers based on age, savings, credit usage, and loan purposes.
+	2.	Personalized Marketing & Services – Offering targeted banking products based on customer segments.
+	3.	Credit Risk Analysis – Identifying high-risk vs. low-risk customer groups.
+	4.	Optimizing Loan Offerings – Helping the bank refine loan approval strategies.
+
+
+##Libraries
+```{r}
+library("ggplot2")
+library("caret")
+library("dplyr")
+library("cluster")
+library("factoextra")
+```
+
+
+## Load dataset
+
+```{r}
+customer <- read.csv("german_credit_data.csv", stringsAsFactors = FALSE)
+head(customer)
+str(customer)
+```
+## Data cleaning
+```{r}
+colSums(is.na(customer))
+```
+```{r}
+customer$Saving.accounts[is.na(customer$Saving.accounts)] <- "Unknown"
+
+customer$Checking.account[is.na(customer$Checking.account)] <- "Unknown"
+```
+
+```{r}
+colSums(is.na(customer))
+```
+In Step 2, we convert categorical variables into numerical form using One-Hot Encoding (OHE) because clustering algorithms (like K-Means) work with numerical data only.
+
+Why is this necessary?
+	•	Machine learning models can’t directly handle categorical data (like “male”/“female” or “own”/“free”/“rent”).
+	•	Distance-based algorithms (e.g., K-Means, Hierarchical Clustering) require numeric inputs to calculate distances between data points.
+	
+```{r}
+#converting categorical variables
+
+customer$Sex <- as.factor(customer$Sex)
+
+customer$Housing <- as.factor(customer$Housing)
+
+customer$Saving.accounts <- as.factor(customer$Saving.accounts)
+
+customer$Checking.account <- as.factor(customer$Checking.account)
+
+customer$Purpose <- as.factor(customer$Purpose)
+
+```
+
+```{r}
+customer_encoded <- model.matrix(~ Sex + Housing + Saving.accounts + Checking.account + Purpose -1, data = customer)
+```
+
+```{r}
+customer_final <- cbind(customer[, c("Age","Job", "Credit.amount", "Duration")], customer_encoded)
+```
+
+```{r}
+head(customer_final)
+```
+
+
+```{r}
+customer_scaled <- scale(customer_final)
+
+```
+Before applying K-Means, we need to choose the number of clusters (k).
+Too few clusters → Loss of information.
+Too many clusters → Overfitting and hard to interpret.
+
+💡 Elbow Method Concept
+	•	K-Means tries to minimize the “within-cluster sum of squares” (WCSS), which measures how close data points are within a cluster.
+	•	As k increases, WCSS decreases (clusters are smaller and more compact).
+	•	However, after a certain k, the WCSS decrease slows down.
+	•	The “Elbow Point” is where adding more clusters does not significantly reduce WCSS anymore.
+### Finding Clusters for K- mean Clustering
+```{r}
+fviz_nbclust(customer_scaled, kmeans, method = "wss")
+```
+	•	The plot shows WCSS vs. k.
+	•	The elbow point (where the curve bends) suggests the best k.
+		•	The y-axis represents the Within-Cluster Sum of Squares (WCSS) (how close data points are within a cluster).
+	•	The x-axis represents the number of clusters (k).
+	•	The goal is to find the “elbow point”, where WCSS stops decreasing significantly.
+
+What is the Optimal k?
+	•	The sharpest drop is between k = 1 to k = 3.
+	•	After k = 3, the WCSS keeps decreasing but at a slower rate.
+	•	The “elbow” seems to be around k = 3 or k = 4.
+	
+### K- Means Clustering Method
+
+```{r}
+set.seed(123)
+kmeans_result <- kmeans(customer_scaled, centers = 3, nstart=25)
+
+customer$Cluster <- as.factor(kmeans_result$cluster)
+
+```
+```{r}
+
+fviz_cluster(kmeans_result, data=customer_scaled)
+```
+
+### Cluster Profiling
+```{r}
+ customer %>%
+  group_by(Cluster) %>%
+  summarise(Age = mean(Age),
+            Credit = mean(Credit.amount),
+            Duration = mean(Duration),
+            Job = mean(Job),
+            Count = n())
+```
+Interpretation
+	•	Cluster 1 (Low-Risk Borrowers) → Largest group (538 customers), moderate age, low credit amounts, and short durations. Likely stable individuals with controlled borrowing.
+	•	Cluster 2 (High-Credit Customers) → Smallest group (169 customers), highest credit amount (~7729), and longest loan duration (~37 months). These customers could be high-income individuals or businesses.
+	•	Cluster 3 (Young Borrowers) → Younger customers (~32.5 years old), smaller loans, short durations. Likely early-career individuals taking short-term loans.
+
+
+### Visualizations
+
+```{r}
+ggplot(customer, aes(x= Cluster, fill = Cluster)) +
+  geom_bar() +
+  ggtitle("Customer Distribution Across Clusters") +
+  xlab("Cluster") + ylab("Number of Customers") +
+  theme_minimal()
+```
+
+```{r}
+ggplot(customer, aes(x= Age, y= Credit.amount, color = Cluster)) +
+  geom_point(alpha=0.6) +
+  ggtitle("Age vs Credit Amount") +
+  xlab("Age") + ylab("Credit Amount") +
+  theme_minimal()
+```
+
